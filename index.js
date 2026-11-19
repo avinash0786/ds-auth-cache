@@ -1,13 +1,10 @@
 const crypto = require('crypto');
 const bluebird = require('bluebird');
-const Redis = require('ioredis');
 const JWT = require('jsonwebtoken');
 const log4js = require('log4js');
 const version = require('./package.json').version;
 const _ = require('lodash');
-
-const host = process.env.CACHE_HOST || 'localhost';
-const port = process.env.CACHE_PORT ? parseInt(process.env.CACHE_PORT) : 6379;
+const redisOpts = require('./redis-options');
 
 let logger = global.logger;
 
@@ -16,29 +13,11 @@ if (!logger) {
     logger.level = process.env.LOG_LEVEL || 'info';
 }
 
-
-function getClusterNodes() {
-    let nodes = [];
-    //format: 127.0.0.1,127.0.0.2:8990 results in 127.0.0.1:6379 and 127.0.0.2:8990 respectively
-    let clusterNodes = process.env.CACHE_CLUSTER.split(',');
-    clusterNodes.map(node => {
-        nodes.push({
-            host: node.split(':')[0],
-            port: node.split(':')[1] || '6379',
-        });
-    });
-    return nodes;
-}
-
 function AuthCache() {
-    this.client = null;
-    if (process.env.CACHE_CLUSTER) {
-        logger.info('Connecting to cache cluster');
-        logger.info('Cache cluster nodes :: ', JSON.stringify(getClusterNodes()));
-        this.client = new Redis.Cluster(getClusterNodes());
-    } else {
-        logger.info(' Connecting to standalone cache'); this.client = new Redis(port, host);
-    }
+    const cfg = redisOpts.getCacheConfig();
+    logger.info(`Connecting to cache :: ${redisOpts.describeCacheConfig(cfg)}`);
+    this.client = redisOpts.createRedisClient();
+    redisOpts.warnOnModeMismatch(this.client, logger, cfg);
     this.client = bluebird.promisifyAll(this.client);
     this.client.on('error', function (err) {
         logger.error(err.message);
@@ -298,5 +277,9 @@ function AuthCacheMW(options) {
 
 module.exports = {
     AuthCache,
-    AuthCacheMW
+    AuthCacheMW,
+    getCacheConfig: redisOpts.getCacheConfig,
+    redisOptions: redisOpts.redisOptions,
+    createRedisClient: redisOpts.createRedisClient,
+    describeCacheConfig: redisOpts.describeCacheConfig,
 };
