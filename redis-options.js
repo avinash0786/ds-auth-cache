@@ -5,8 +5,9 @@
 // Precedence:
 //   1. CACHE_SENTINELS (or a redis+sentinel:// URL)  -> Sentinel (HA cache: 1 primary + replicas)
 //   2. CACHE_CLUSTER                                 -> Redis Cluster (unchanged behaviour)
-//   3. REDIS_URL / CACHE_URL                         -> standalone, from the URL
-//   4. CACHE_HOST / CACHE_PORT                       -> standalone (default, same as before)
+//   3. CACHE_HOST / CACHE_PORT                       -> standalone (same as before)
+//   4. REDIS_URL / CACHE_URL                         -> standalone, from the URL (only when CACHE_HOST is not set)
+//   5. nothing set                                   -> localhost:6379 (same as before)
 //
 // With none of the new variables set, the connection is the same as before this change,
 // so one build works with both the single-pod cache and the Sentinel cache.
@@ -74,7 +75,9 @@ function getCacheConfig(env = process.env) {
         };
     }
 
-    if (url) {
+    // CACHE_HOST wins over REDIS_URL: DNIO pods get both (configmap + dnio-secrets),
+    // and earlier versions of this library only used CACHE_HOST/CACHE_PORT.
+    if (url && !env.CACHE_HOST) {
         // Credentials in the URL win over REDIS_PASSWORD.
         return { mode: 'standalone', url, options: password ? { password } : {} };
     }
@@ -92,8 +95,20 @@ function getCacheConfig(env = process.env) {
 function redisOptions(extra = {}, env = process.env) {
     const cfg = getCacheConfig(env);
     if (cfg.mode === 'cluster') throw new Error('redisOptions() does not support CACHE_CLUSTER; use createRedisClient()');
-    if (cfg.url) return { ...cfg.options, ...extra, url: cfg.url };
+    // BullMQ ignores a `url` key, so turn the URL into plain ioredis options.
+    if (cfg.url) return { ...urlToOptions(cfg.url), ...cfg.options, ...extra };
     return { ...cfg.options, ...extra };
+}
+
+function urlToOptions(url) {
+    const u = new URL(url);
+    const o = { host: u.hostname || 'localhost', port: parseInt(u.port, 10) || 6379 };
+    if (u.username) o.username = decodeURIComponent(u.username);
+    if (u.password) o.password = decodeURIComponent(u.password);
+    const db = parseInt(u.pathname.slice(1), 10);
+    if (!Number.isNaN(db)) o.db = db;
+    if (u.protocol === 'rediss:') o.tls = {};
+    return o;
 }
 
 function createRedisClient(extra = {}, env = process.env) {

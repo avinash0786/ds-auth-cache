@@ -64,7 +64,16 @@ test('REDIS_URL: standalone from URL', () => {
     assert.strictEqual(cfg.mode, 'standalone');
     assert.strictEqual(cfg.url, 'redis://cache.dnio:6379');
     assert.deepStrictEqual(redisOptions({ maxRetriesPerRequest: null }, { REDIS_URL: 'redis://cache.dnio:6379' }),
-        { maxRetriesPerRequest: null, url: 'redis://cache.dnio:6379' });
+        { host: 'cache.dnio', port: 6379, maxRetriesPerRequest: null });
+    assert.deepStrictEqual(redisOptions({}, { REDIS_URL: 'rediss://:p%40ss@cache.dnio:6380/2' }),
+        { host: 'cache.dnio', port: 6380, password: 'p@ss', db: 2, tls: {} });
+});
+
+test('CACHE_HOST wins over REDIS_URL (DNIO pods get both)', () => {
+    const cfg = getCacheConfig({ CACHE_HOST: 'external-redis', CACHE_PORT: '6380', REDIS_URL: 'redis://cache.dnio:6379' });
+    assert.strictEqual(cfg.mode, 'standalone');
+    assert.strictEqual(cfg.url, undefined);
+    assert.deepStrictEqual(cfg.options, { host: 'external-redis', port: 6380 });
 });
 
 test('describeCacheConfig never prints the password', () => {
